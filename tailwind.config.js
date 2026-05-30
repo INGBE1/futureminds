@@ -5,11 +5,11 @@ export default {
     extend: {
       colors: {
         brand: {
-          50: '#f3f1ff',
-          100: '#ebe5ff',
-          500: '#7c5cff',
-          600: '#6b46f0',
-          700: '#5a37d4',
+          50: '#fff3eb',
+          100: '#ffe2cc',
+          500: '#ff6200', // ING Orange
+          600: '#e85800',
+          700: '#cc4e00',
         },
         mint: {
           400: '#34d399',
@@ -20,7 +20,7 @@ export default {
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
       boxShadow: {
-        soft: '0 8px 30px -12px rgba(76, 60, 120, 0.18)',
+        soft: '0 8px 30px -12px rgba(255, 98, 0, 0.20)',
       },
       borderRadius: {
         '4xl': '2rem',

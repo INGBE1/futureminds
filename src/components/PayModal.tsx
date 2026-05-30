@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Sparkles, X } from 'lucide-react'
-import type { PurchaseAdvice, PurchaseInput } from '../types'
+import { ArrowLeft, Check, Loader2, Sparkles, X } from 'lucide-react'
+import type { PurchaseAdvice, PurchaseInput, Usefulness } from '../types'
 import { useApp, priorityGoal } from '../context/AppContext'
 import { getPurchaseAdvice } from '../lib/claude'
 import { AdviceView } from './AdviceView'
+import { formatEUR } from '../lib/finance'
 
-type Step = 'form' | 'loading' | 'advice'
+type Step = 'form' | 'loading' | 'advice' | 'confirmAlt'
+
+interface PendingAlt {
+  name: string
+  price: number
+  why?: string
+}
 
 const empty: PurchaseInput = { item: '', reason: '', recipient: '', amount: 0 }
 
@@ -15,6 +22,7 @@ export function PayModal({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState<PurchaseInput>(empty)
   const [amountStr, setAmountStr] = useState('')
   const [advice, setAdvice] = useState<PurchaseAdvice | null>(null)
+  const [pendingAlt, setPendingAlt] = useState<PendingAlt | null>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -35,13 +43,25 @@ export function PayModal({ onClose }: { onClose: () => void }) {
     setStep('advice')
   }
 
+  // Le verdict du conseil détermine l'utilité de la transaction créée.
+  const usefulness: Usefulness =
+    advice?.verdict === 'confirm' ? 'useful' : advice?.verdict === 'avoid' ? 'avoid' : 'neutral'
+
   function handleConfirm() {
-    confirmPurchase({ ...form, amount })
+    confirmPurchase({ ...form, amount }, { usefulness })
     onClose()
   }
 
+  // L'utilisateur choisit l'alternative → écran de confirmation récapitulatif.
   function handlePickAlternative(name: string, price: number) {
-    confirmPurchase({ ...form, item: name, amount: price })
+    setPendingAlt({ name, price, why: advice?.alternative?.why })
+    setStep('confirmAlt')
+  }
+
+  // Confirmation explicite de l'alternative depuis l'écran récap.
+  function handleConfirmAlternative() {
+    if (!pendingAlt) return
+    confirmPurchase({ ...form, item: pendingAlt.name, amount: pendingAlt.price }, { usefulness })
     onClose()
   }
 
@@ -56,7 +76,11 @@ export function PayModal({ onClose }: { onClose: () => void }) {
         <div className="mb-4 flex items-center justify-between">
           <h2 className="flex items-center gap-2 text-lg font-extrabold">
             <Sparkles size={18} className="text-brand-600" />
-            {step === 'advice' ? 'Avant de payer…' : 'Nouveau paiement'}
+            {step === 'advice'
+              ? 'Avant de payer…'
+              : step === 'confirmAlt'
+                ? "Confirmer l'alternative"
+                : 'Nouveau paiement'}
           </h2>
           <button
             onClick={onClose}
@@ -135,6 +159,50 @@ export function PayModal({ onClose }: { onClose: () => void }) {
             onCancel={onClose}
             onPickAlternative={handlePickAlternative}
           />
+        )}
+
+        {step === 'confirmAlt' && pendingAlt && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Tu remplaces ton achat initial par cette alternative. Vérifie le récapitulatif puis
+              confirme.
+            </p>
+
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <div className="text-xs font-medium text-slate-400 line-through">
+                {form.item || 'Achat initial'} · {formatEUR(amount)}
+              </div>
+              <div className="mt-2 flex items-baseline justify-between gap-2">
+                <span className="text-sm font-bold text-slate-800">{pendingAlt.name}</span>
+                <span className="text-lg font-extrabold text-brand-600">
+                  {formatEUR(pendingAlt.price)}
+                </span>
+              </div>
+              {pendingAlt.why && (
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">{pendingAlt.why}</p>
+              )}
+              {pendingAlt.price < amount && (
+                <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                  💚 Tu économises {formatEUR(amount - pendingAlt.price)} par rapport à l'achat initial.
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setStep('advice')}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+              >
+                <ArrowLeft size={16} /> Retour
+              </button>
+              <button
+                onClick={handleConfirmAlternative}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl brand-gradient px-4 py-3 text-sm font-semibold text-white shadow-soft transition hover:brightness-105"
+              >
+                <Check size={16} /> Confirmer · {formatEUR(pendingAlt.price)}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

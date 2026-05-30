@@ -15,6 +15,35 @@ export function goalProgress(goal: Goal): number {
   return Math.min(1, goal.saved / goal.target)
 }
 
+export function goalCompleted(goal: Goal): boolean {
+  return goal.saved >= goal.target
+}
+
+/** Nombre de mois restants jusqu'à la date limite (au moins 1). */
+export function monthsUntil(deadline: string): number {
+  const now = new Date()
+  const end = new Date(deadline)
+  const months =
+    (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth())
+  return Math.max(1, months)
+}
+
+/**
+ * Épargne mensuelle requise pour atteindre un objectif.
+ * Avec date limite : réparti sur les mois restants.
+ * Sans date limite : horizon par défaut (court = 6 mois, long = 24 mois).
+ */
+export function monthlyForGoal(goal: Goal): number {
+  const remaining = Math.max(0, goal.target - goal.saved)
+  if (remaining === 0) return 0
+  const months = goal.deadline
+    ? monthsUntil(goal.deadline)
+    : goal.horizon === 'short'
+      ? 6
+      : 24
+  return Math.ceil(remaining / months)
+}
+
 /** Objectif prioritaire = le plus proche d'être atteint mais non terminé. */
 export function priorityGoal(goals: Goal[]): Goal | null {
   const open = goals.filter((g) => g.saved < g.target)
@@ -49,43 +78,75 @@ export function localAdvice(input: PurchaseInput, account: Account, goal: Goal |
   const { amount } = input
   const goalDelayDays = estimateGoalDelayDays(amount, account)
   const shareOfBalance = account.balance > 0 ? amount / account.balance : 1
+  const pct = Math.round(shareOfBalance * 100)
+
+  // Signaux factuels tirés de la raison invoquée (sans jugement de valeur).
+  const looksEssential = /répar|essentiel|santé|médic|travail|boulot|école|étud|nécessa|urgen|sécur|indispensable/i.test(
+    input.reason,
+  )
+  const looksImpulse = /envie|impulsion|soldes|promo|tendance|hype|coup de c|ennui/i.test(input.reason)
 
   const pros: string[] = []
   const cons: string[] = []
 
-  if (amount < 30) pros.push('Petit montant : impact limité sur ton budget.')
-  if (shareOfBalance < 0.05) pros.push('Représente une faible part de ton solde actuel.')
-  if (/répar|essentiel|santé|travail|école|nécessa/i.test(input.reason))
-    pros.push('La raison invoquée semble être un besoin essentiel.')
-  if (pros.length === 0) pros.push('Un achat réfléchi peut faire plaisir et rester raisonnable.')
+  // --- POUR (faits qui jouent en faveur de l'achat) ---
+  if (looksEssential)
+    pros.push("La raison indiquée correspond à un besoin (réparation, santé, travail…).")
+  if (shareOfBalance <= 0.05)
+    pros.push(`Faible poids budgétaire : ${pct} % de ton solde actuel.`)
+  if (goalDelayDays > 0 && goalDelayDays <= 5)
+    pros.push(`Impact limité sur ton objectif : ${formatDelay(goalDelayDays)} de retard seulement.`)
+  else if (goalDelayDays === 0)
+    pros.push("Aucun retard mesurable sur ton objectif d'épargne.")
+  if (amount <= account.balance && shareOfBalance <= 0.15)
+    pros.push('Ton solde couvre cet achat tout en gardant une marge confortable.')
 
-  if (shareOfBalance > 0.2)
-    cons.push(`Cet achat représente ${Math.round(shareOfBalance * 100)} % de ton solde.`)
-  if (goal) cons.push(`Ton objectif « ${goal.name} » sera retardé de ${formatDelay(goalDelayDays)}.`)
-  if (/envie|impulsion|soldes|promo|tendance/i.test(input.reason))
-    cons.push('La motivation ressemble à un achat impulsif.')
-  if (cons.length === 0) cons.push('Vérifie que tu en as réellement besoin maintenant.')
+  // --- CONTRE (faits qui appellent à la prudence) ---
+  if (shareOfBalance >= 0.2) cons.push(`Poids élevé : ${pct} % de ton solde y passerait.`)
+  if (amount > account.balance)
+    cons.push('Le montant dépasse ton solde actuel.')
+  if (goal && goalDelayDays > 5)
+    cons.push(`Ton objectif « ${goal.name} » reculerait de ${formatDelay(goalDelayDays)}.`)
+  if (looksImpulse)
+    cons.push("La motivation décrite évoque plutôt une envie ponctuelle qu'un besoin.")
+
+  // Garantir au moins un point de chaque côté, formulé neutrement.
+  if (pros.length === 0)
+    pros.push(
+      `Achat assumé : ${pct} % de ton solde, ${
+        goalDelayDays > 0 ? `${formatDelay(goalDelayDays)} de retard sur ton objectif` : 'sans retard notable'
+      }.`,
+    )
+  if (cons.length === 0)
+    cons.push("Vérifie que le besoin est réel et que le moment est le bon.")
 
   let verdict: PurchaseAdvice['verdict'] = 'confirm'
   if (shareOfBalance > 0.35 || amount > account.balance) verdict = 'avoid'
   else if (shareOfBalance > 0.15 || goalDelayDays > 20) verdict = 'reconsider'
+  // Un besoin essentiel et abordable ne devrait pas être découragé sans raison.
+  if (looksEssential && shareOfBalance <= 0.25 && amount <= account.balance && verdict === 'reconsider')
+    verdict = 'confirm'
 
   const alternative =
     amount >= 60
       ? {
-          name: `${input.item} — option plus abordable`,
+          name: `${input.item} — version plus abordable`,
           price: Math.round(amount * 0.6 * 100) / 100,
-          why: 'Une alternative ~40 % moins chère limiterait le retard sur ton objectif.',
+          why: `Environ 40 % moins cher : le retard sur ton objectif passerait à ${formatDelay(
+            estimateGoalDelayDays(Math.round(amount * 0.6 * 100) / 100, account),
+          )}.`,
         }
       : null
 
   return {
     summary:
       verdict === 'avoid'
-        ? 'Cet achat pèse lourd sur ton budget — mieux vaut attendre.'
+        ? `Cet achat représente ${pct} % de ton solde et retarde ton objectif de ${formatDelay(goalDelayDays)}.`
         : verdict === 'reconsider'
-          ? 'Achat possible, mais il vaut la peine d’y réfléchir à deux fois.'
-          : 'Cet achat semble raisonnable au vu de ton budget.',
+          ? `Achat possible : ${pct} % de ton solde, ${formatDelay(goalDelayDays)} de retard sur ton objectif.`
+          : `Achat soutenable : ${pct} % de ton solde, impact ${
+              goalDelayDays > 0 ? `de ${formatDelay(goalDelayDays)}` : 'négligeable'
+            } sur ton objectif.`,
     pros,
     cons,
     verdict,
