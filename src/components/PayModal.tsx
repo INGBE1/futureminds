@@ -17,7 +17,7 @@ interface PendingAlt {
 const empty: PurchaseInput = { item: '', reason: '', recipient: '', amount: 0 }
 
 export function PayModal({ onClose }: { onClose: () => void }) {
-  const { account, goals, settings, confirmPurchase, hasApiKey, setActiveTab } = useApp()
+  const { account, goals, settings, confirmPurchase } = useApp()
   const [step, setStep] = useState<Step>('form')
   const [form, setForm] = useState<PurchaseInput>(empty)
   const [amountStr, setAmountStr] = useState('')
@@ -93,18 +93,6 @@ export function PayModal({ onClose }: { onClose: () => void }) {
 
         {step === 'form' && (
           <div className="space-y-3">
-            {!hasApiKey && (
-              <button
-                onClick={() => {
-                  onClose()
-                  setActiveTab('settings')
-                }}
-                className="w-full rounded-2xl bg-amber-50 px-4 py-2.5 text-left text-xs font-medium text-amber-800 hover:bg-amber-100"
-              >
-                💡 Aucune clé API Claude — conseil calculé localement. Touchez pour en ajouter une.
-              </button>
-            )}
-
             <Field
               label="Qu'achetez-vous ?"
               value={form.item}

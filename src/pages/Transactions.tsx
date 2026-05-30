@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Sparkles } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { Card } from '../components/Card'
-import { SpendingChart } from '../components/SpendingChart'
+import { BalanceChart } from '../components/SpendingChart'
 import { formatEUR } from '../lib/finance'
 import {
-  buildSeries,
+  buildBalanceSeries,
   inPeriod,
   PERIOD_LABEL,
   summarize,
@@ -29,17 +29,18 @@ const dateFmt = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long'
 const PERIODS: SpendingPeriod[] = ['week', 'month', 'year', 'all']
 
 export function Transactions() {
-  const { transactions, settings } = useApp()
+  const { account, transactions, settings } = useApp()
   const [period, setPeriod] = useState<SpendingPeriod>('month')
   const [profile, setProfile] = useState<SpendingProfile | null>(null)
   const [loadingProfile, setLoadingProfile] = useState(false)
 
-  const series = useMemo(() => buildSeries(transactions, period), [transactions, period])
-  const summary = useMemo(() => summarize(transactions, period), [transactions, period])
-  const visible = useMemo(
-    () => inPeriod(transactions, period).filter((t) => t.amount < 0),
-    [transactions, period],
+  const balanceSeries = useMemo(
+    () => buildBalanceSeries(transactions, account.balance, period),
+    [transactions, account.balance, period],
   )
+  const summary = useMemo(() => summarize(transactions, period), [transactions, period])
+  // Historique complet : dépenses ET crédits (salaire, revente…).
+  const visible = useMemo(() => inPeriod(transactions, period), [transactions, period])
 
   // Profil de dépense : local instantané, affiné par l'IA si une clé existe.
   useEffect(() => {
@@ -84,9 +85,9 @@ export function Transactions() {
         })}
       </div>
 
-      {/* Graphique */}
+      {/* Graphique d'évolution du solde */}
       <Card>
-        <SpendingChart data={series} total={summary.total} />
+        <BalanceChart data={balanceSeries} />
       </Card>
 
       {/* Profil de dépense */}
@@ -133,14 +134,18 @@ export function Transactions() {
           <h2 className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-slate-400">{day}</h2>
           <div className="space-y-2">
             {txs.map((tx) => {
-              const style = usefulnessStyle[usefulnessOf(tx)]
+              const isCredit = tx.amount >= 0
+              // Crédits en vert ; dépenses colorées par utilité.
+              const style = isCredit
+                ? { bg: 'bg-emerald-50', ring: 'ring-emerald-200' }
+                : usefulnessStyle[usefulnessOf(tx)]
               return (
                 <div
                   key={tx.id}
                   className={`flex items-center gap-3 rounded-2xl px-3 py-3 shadow-sm ring-1 ${style.bg} ${style.ring}`}
                 >
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/70 text-lg">
-                    {categoryEmoji[tx.category]}
+                    {isCredit ? '💰' : categoryEmoji[tx.category]}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold text-slate-800">{tx.label}</div>
@@ -148,7 +153,14 @@ export function Transactions() {
                       {tx.recipient} · {tx.reason}
                     </div>
                   </div>
-                  <div className="shrink-0 text-sm font-bold text-slate-800">{formatEUR(tx.amount)}</div>
+                  <div
+                    className={`shrink-0 text-sm font-bold ${
+                      isCredit ? 'text-emerald-600' : 'text-slate-800'
+                    }`}
+                  >
+                    {isCredit ? '+' : ''}
+                    {formatEUR(tx.amount)}
+                  </div>
                 </div>
               )
             })}
@@ -158,7 +170,7 @@ export function Transactions() {
 
       {visible.length === 0 && (
         <Card className="py-10 text-center text-sm text-slate-400">
-          Aucune dépense sur cette période.
+          Aucune transaction sur cette période.
         </Card>
       )}
     </div>

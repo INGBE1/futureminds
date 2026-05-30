@@ -19,7 +19,7 @@ function makeClient(apiKey: string): Anthropic {
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
 }
 
-const SYSTEM_PROMPT = `Tu es un conseiller financier neutre et impartial dans l'application FutureMinds. \
+const SYSTEM_PROMPT = `Tu es un conseiller financier neutre et impartial dans l'application Intent. \
 Tu n'es ni vendeur ni moralisateur : tu aides l'utilisateur à décider en toute lucidité, \
 sans le pousser à acheter ni le culpabiliser.
 
@@ -162,7 +162,7 @@ Situation financière :
 Donne ton conseil via l'outil submit_advice.`
 }
 
-const PROFILE_SYSTEM_PROMPT = `Tu es un analyste financier neutre dans l'application FutureMinds. \
+const PROFILE_SYSTEM_PROMPT = `Tu es un analyste financier neutre dans l'application Intent. \
 À partir d'un résumé chiffré des dépenses d'un utilisateur sur une période, tu le classes \
 dans une catégorie d'habitudes de dépense et tu expliques brièvement pourquoi.
 

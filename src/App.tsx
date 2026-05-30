@@ -1,6 +1,7 @@
-import { Settings as SettingsIcon, Sparkles } from 'lucide-react'
+import { Settings as SettingsIcon } from 'lucide-react'
 import { useApp } from './context/AppContext'
 import { BottomNav } from './components/BottomNav'
+import { Logo } from './components/Logo'
 import { Home } from './pages/Home'
 import { Transactions } from './pages/Transactions'
 import { Goals } from './pages/Goals'
@@ -14,10 +15,8 @@ export default function App() {
     <div className="mx-auto flex min-h-full max-w-md flex-col">
       <header className="sticky top-0 z-20 flex items-center justify-between bg-slate-50/80 px-5 pb-3 pt-5 backdrop-blur">
         <div className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl brand-gradient text-white shadow-soft">
-            <Sparkles size={18} />
-          </span>
-          <span className="text-lg font-extrabold tracking-tight text-slate-800">FutureMinds</span>
+          <Logo size={36} />
+          <span className="text-lg font-extrabold tracking-tight text-slate-800">Intent</span>
         </div>
         <button
           onClick={() => setActiveTab('settings')}

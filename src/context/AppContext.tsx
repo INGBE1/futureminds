@@ -10,6 +10,8 @@ import type {
   Account,
   ClaudeModel,
   Goal,
+  Investment,
+  Product,
   PurchaseInput,
   Settings,
   Tab,
@@ -17,12 +19,18 @@ import type {
   TransactionCategory,
   Usefulness,
 } from '../types'
-import { initialAccount, initialGoals, initialTransactions } from '../data/mockData'
+import {
+  initialAccount,
+  initialGoals,
+  initialInvestments,
+  initialTransactions,
+} from '../data/mockData'
+import { currentValue } from '../lib/invest'
 import { loadJSON, saveJSON, loadString, saveString, removeKey } from '../lib/storage'
 import { priorityGoal } from '../lib/finance'
 
 // Bump quand les données mock changent de forme : force le rechargement des seeds.
-const DATA_VERSION = '3'
+const DATA_VERSION = '9'
 
 interface AppState {
   account: Account
@@ -43,6 +51,13 @@ interface AppState {
   addGoal: (goal: Omit<Goal, 'id' | 'saved'>) => void
   /** Ajoute de l'argent à un objectif : débite le solde + crée une transaction d'épargne. */
   addToGoal: (goalId: string, amount: number) => void
+  investments: Investment[]
+  /** Transfère du solde vers le cash à investir (+ transaction). */
+  addInvestFunds: (amount: number) => void
+  /** Investit du cash dans un produit. */
+  addInvestment: (product: Product, amount: number, months: number) => void
+  /** Revend un investissement : recrédite le solde (+ transaction). */
+  sellInvestment: (id: string) => void
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -62,11 +77,12 @@ function hashString(s: string): number {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   // Si la version des données a changé, on repart des seeds (sans toucher clé/modèle).
+  // La version n'est validée qu'APRÈS le montage (useEffect) pour éviter qu'un
+  // rechargement interrompu ne laisse une version à jour avec des données périmées.
   const fresh = loadString('dataVersion') !== DATA_VERSION
-  if (fresh) saveString('dataVersion', DATA_VERSION)
 
   const [account, setAccount] = useState<Account>(() =>
-    fresh ? initialAccount : loadJSON('account', initialAccount),
+    fresh ? initialAccount : { ...initialAccount, ...loadJSON('account', initialAccount) },
   )
   const [transactions, setTransactions] = useState<Transaction[]>(() =>
     fresh ? initialTransactions : loadJSON('transactions', initialTransactions),
@@ -74,15 +90,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [goals, setGoals] = useState<Goal[]>(() =>
     fresh ? initialGoals : loadJSON('goals', initialGoals),
   )
+  const [investments, setInvestments] = useState<Investment[]>(() =>
+    fresh ? initialInvestments : loadJSON('investments', initialInvestments),
+  )
   const [apiKey, setApiKeyState] = useState<string>(() => loadString('apiKey'))
   const [model, setModelState] = useState<ClaudeModel>(
     () => (loadString('model') as ClaudeModel) || 'claude-sonnet-4-6',
   )
   const [activeTab, setActiveTab] = useState<Tab>('home')
 
+  // Valide la version des données une fois le premier cycle de persistance enclenché.
+  useEffect(() => saveString('dataVersion', DATA_VERSION), [])
   useEffect(() => saveJSON('account', account), [account])
   useEffect(() => saveJSON('transactions', transactions), [transactions])
   useEffect(() => saveJSON('goals', goals), [goals])
+  useEffect(() => saveJSON('investments', investments), [investments])
   useEffect(() => saveString('model', model), [model])
 
   function setApiKey(key: string) {
@@ -139,7 +161,88 @@ export function AppProvider({ children }: { children: ReactNode }) {
         amount: -amt,
         category: 'savings',
         date: new Date().toISOString(),
-        usefulness: 'useful',
+        usefulness: 'neutral',
+      },
+      ...prev,
+    ])
+  }
+
+  function addInvestFunds(amount: number) {
+    const amt = Math.abs(amount)
+    if (amt <= 0) return
+    setAccount((prev) => ({
+      ...prev,
+      balance: Math.round((prev.balance - amt) * 100) / 100,
+      investCash: Math.round((prev.investCash + amt) * 100) / 100,
+    }))
+    setTransactions((prev) => [
+      {
+        id: genId(),
+        label: 'Approvisionnement investissement',
+        recipient: 'Portefeuille',
+        reason: 'Transfert vers le cash à investir',
+        amount: -amt,
+        category: 'savings',
+        date: new Date().toISOString(),
+        usefulness: 'neutral',
+      },
+      ...prev,
+    ])
+  }
+
+  function addInvestment(product: Product, amount: number, months: number) {
+    const amt = Math.abs(amount)
+    if (amt <= 0 || amt > account.investCash) return
+    const inv: Investment = {
+      id: 'inv' + genId(),
+      productName: product.name,
+      type: product.type,
+      risk: product.risk,
+      amount: Math.round(amt * 100) / 100,
+      annualRate: product.annualRate,
+      months,
+      startDate: new Date().toISOString(),
+    }
+    setInvestments((prev) => [inv, ...prev])
+    setAccount((prev) => ({
+      ...prev,
+      investCash: Math.round((prev.investCash - amt) * 100) / 100,
+    }))
+    // Transfert interne (puise dans le cash à investir, pas le solde) → n'affecte pas la courbe.
+    setTransactions((prev) => [
+      {
+        id: genId(),
+        label: `Investissement · ${product.name}`,
+        recipient: 'Portefeuille',
+        reason: 'Achat de produit d’investissement',
+        amount: -amt,
+        category: 'savings',
+        date: new Date().toISOString(),
+        usefulness: 'neutral',
+        affectsBalance: false,
+      },
+      ...prev,
+    ])
+  }
+
+  function sellInvestment(id: string) {
+    const inv = investments.find((i) => i.id === id)
+    if (!inv) return
+    const value = currentValue(inv)
+    setInvestments((prev) => prev.filter((i) => i.id !== id))
+    setAccount((prev) => ({
+      ...prev,
+      balance: Math.round((prev.balance + value) * 100) / 100,
+    }))
+    setTransactions((prev) => [
+      {
+        id: genId(),
+        label: `Revente · ${inv.productName}`,
+        recipient: 'Portefeuille',
+        reason: 'Vente d’investissement',
+        amount: value,
+        category: 'other',
+        date: new Date().toISOString(),
       },
       ...prev,
     ])
@@ -159,8 +262,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       confirmPurchase,
       addGoal,
       addToGoal,
+      investments,
+      addInvestFunds,
+      addInvestment,
+      sellInvestment,
     }),
-    [account, transactions, goals, apiKey, model, activeTab],
+    [account, transactions, goals, investments, apiKey, model, activeTab],
   )
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

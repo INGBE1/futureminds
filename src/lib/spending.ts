@@ -10,7 +10,7 @@ import type {
 const CATEGORY_USEFULNESS: Record<TransactionCategory, Usefulness> = {
   bills: 'useful',
   transport: 'useful',
-  savings: 'useful',
+  savings: 'neutral',
   food: 'useful',
   leisure: 'avoid',
   shopping: 'avoid',
@@ -96,6 +96,82 @@ export function buildSeries(transactions: Transaction[], period: SpendingPeriod)
   return [...buckets.values()]
     .sort((a, b) => a.sortKey - b.sortKey)
     .map(({ label, total }) => ({ label, total: Math.round(total * 100) / 100 }))
+}
+
+export interface BalancePoint {
+  label: string
+  balance: number
+  date: string // ISO du bucket (pour le tooltip)
+}
+
+const SAMPLE_COUNT: Record<SpendingPeriod, number> = {
+  week: 7,
+  month: 15,
+  year: 13,
+  all: 13,
+}
+
+/**
+ * Reconstruit l'évolution du solde sur la période, en remontant depuis le solde actuel.
+ * Ignore les transferts internes (affectsBalance === false).
+ *
+ * Échantillonne le solde à intervalles RÉGULIERS sur toute la fenêtre (et pas seulement
+ * là où il existe une transaction) : la courbe est donc toujours remplie, même sur les
+ * longues périodes (Année / Tout).
+ */
+export function buildBalanceSeries(
+  transactions: Transaction[],
+  currentBalance: number,
+  period: SpendingPeriod,
+): BalancePoint[] {
+  const affecting = transactions
+    .filter((t) => t.affectsBalance !== false)
+    .slice()
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  // Solde de départ = solde actuel moins la somme de toutes les transactions.
+  const sum = affecting.reduce((s, t) => s + t.amount, 0)
+  const startBalance = Math.round((currentBalance - sum) * 100) / 100
+
+  // Suite cumulée : solde APRÈS chaque transaction, avec son horodatage.
+  const cumulative: { time: number; balance: number }[] = []
+  let running = startBalance
+  for (const tx of affecting) {
+    running = Math.round((running + tx.amount) * 100) / 100
+    cumulative.push({ time: new Date(tx.date).getTime(), balance: running })
+  }
+
+  const now = Date.now()
+  const firstTime = affecting.length ? new Date(affecting[0].date).getTime() : now
+  const from = period === 'all' ? firstTime : Math.max(periodStart(period).getTime(), firstTime)
+  const to = now
+  const byMonth = period === 'year' || period === 'all'
+
+  /** Dernier solde connu à la date donnée (sinon solde de départ). */
+  const balanceAt = (time: number): number => {
+    let bal = startBalance
+    for (const c of cumulative) {
+      if (c.time <= time) bal = c.balance
+      else break
+    }
+    return bal
+  }
+
+  const fmt = (time: number): string =>
+    new Date(time).toLocaleDateString('fr-FR', byMonth ? { month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' })
+
+  const n = SAMPLE_COUNT[period]
+  const span = Math.max(1, to - from)
+  const points: BalancePoint[] = []
+  for (let i = 0; i < n; i++) {
+    const t = i === n - 1 ? to : from + (span * i) / (n - 1)
+    points.push({
+      label: fmt(t),
+      balance: i === n - 1 ? currentBalance : balanceAt(t),
+      date: new Date(t).toISOString(),
+    })
+  }
+  return points
 }
 
 export interface SpendingSummary {
